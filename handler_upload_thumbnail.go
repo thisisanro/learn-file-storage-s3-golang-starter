@@ -5,7 +5,6 @@ import (
 	"io"
 	"net/http"
 	"os"
-	"path/filepath"
 
 	"github.com/bootdotdev/learn-file-storage-s3-golang-starter/internal/auth"
 	"github.com/google/uuid"
@@ -43,6 +42,20 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 
 	contentType := header.Header.Get("Content-Type")
 
+	assetPath := getAssetPath(videoID, contentType)
+	assetDiskPath := cfg.getAssetDiskPath(assetPath)
+
+	dst, err := os.Create(assetDiskPath)
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Unable to create file on server", err)
+		return
+	}
+	defer dst.Close()
+	if _, err = io.Copy(dst, file); err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't save file", err)
+		return
+	}
+
 	video, err := cfg.db.GetVideo(videoID)
 	if err != nil {
 		respondWithError(w, http.StatusInternalServerError, "Couldn't get video metadata", err)
@@ -53,30 +66,7 @@ func (cfg *apiConfig) handlerUploadThumbnail(w http.ResponseWriter, r *http.Requ
 		return
 	}
 
-	var suffix string
-	switch contentType {
-	case "image/jpeg":
-		suffix = ".jpg"
-	case "image/png":
-		suffix = ".png"
-	}
-	filePath := videoIDString + suffix
-	diskPath := filepath.Join(cfg.assetsRoot, filePath)
-
-	fileOnDisk, err := os.Create(diskPath)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't save the file", err)
-		return
-	}
-	defer fileOnDisk.Close()
-
-	_, err = io.Copy(fileOnDisk, file)
-	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't copy the file", err)
-		return
-	}
-
-	URL := fmt.Sprintf("http://localhost:%s/assets/%s%s", cfg.port, videoIDString, suffix)
+	URL := cfg.getAssetURL(assetPath)
 	video.ThumbnailURL = &URL
 	err = cfg.db.UpdateVideo(video)
 	if err != nil {
