@@ -1,11 +1,15 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"fmt"
 	"io"
+	"math"
 	"mime"
 	"net/http"
 	"os"
+	"os/exec"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
@@ -74,10 +78,15 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 		respondWithError(w, http.StatusInternalServerError, "Couldn't save file", err)
 		return
 	}
-
 	f.Seek(0, io.SeekStart)
 
-	key := getAssetPath(mediaType)
+	ratio, err := getVideoAspectRatio(f.Name())
+	if err != nil {
+		respondWithError(w, http.StatusInternalServerError, "Couldn't get ratio", err)
+		return
+	}
+
+	key := fmt.Sprintf("%s/%s", ratio, getAssetPath(mediaType))
 	_, err = cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
 		Bucket:      aws.String(cfg.s3Bucket),
 		Key:         aws.String(key),
@@ -100,4 +109,35 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	fmt.Println("uploading video", videoID, "by user", userID)
 
 	respondWithJSON(w, http.StatusOK, video)
+}
+
+func getVideoAspectRatio(filePath string) (string, error) {
+	cmd := exec.Command("ffprobe", "-v", "error", "-print_format", "json", "-show_streams", filePath)
+	var b bytes.Buffer
+	cmd.Stdout = &b
+
+	err := cmd.Run()
+	if err != nil {
+		return "", err
+	}
+
+	var result struct {
+		Streams []struct {
+			Width  int `json:"width"`
+			Height int `json:"height"`
+		} `json:"streams"`
+	}
+
+	err = json.Unmarshal(b.Bytes(), &result)
+
+	width := float64(result.Streams[0].Width)
+	height := float64(result.Streams[0].Height)
+	ratio := width / height
+	if math.Abs(ratio-16.0/9.0) < 0.01 {
+		return "landscape", nil
+	} else if math.Abs(ratio-9.0/16.0) < 0.01 {
+		return "portrait", nil
+	} else {
+		return "other", nil
+	}
 }
