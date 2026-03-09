@@ -88,7 +88,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 
 	processedFilePath, err := processVideoForFastStart(f.Name())
 	if err != nil {
-		respondWithError(w, http.StatusInternalServerError, "Couldn't get file path", err)
+		respondWithError(w, http.StatusInternalServerError, "Error processing video", err)
 		return
 	}
 	defer os.Remove(processedFilePath)
@@ -101,6 +101,7 @@ func (cfg *apiConfig) handlerUploadVideo(w http.ResponseWriter, r *http.Request)
 	defer processedFile.Close()
 
 	key := fmt.Sprintf("%s/%s", ratio, getAssetPath(mediaType))
+
 	_, err = cfg.s3Client.PutObject(r.Context(), &s3.PutObjectInput{
 		Bucket:      aws.String(cfg.s3Bucket),
 		Key:         aws.String(key),
